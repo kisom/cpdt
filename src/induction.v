@@ -789,7 +789,8 @@ Proof.
   
   ============================
    true = false -> False
-]]*)
+]]
+*)
 
   intro H.
 
@@ -800,10 +801,12 @@ Proof.
   H : true = false
   ============================
    False
-]]*)
+]]
+*)
 
   Definition toProp (b : bool) := if b then True else False.
   change (toProp false).
+
 
 (**
 [[
@@ -812,7 +815,8 @@ Proof.
   H : true = false
   ============================
    toProp false
-]]*)
+]]
+*)
 
   rewrite <- H.
 (**
@@ -834,7 +838,8 @@ Proof.
   H : true = false
   ============================
    True
-]]*)
+]]
+*)
 
   trivial.
 Qed.
@@ -863,4 +868,3 @@ Qed.
 
 (** A few carefully chosen rules enable desired reasoning patterns,
 minimising the complexity of proof checking.*)
-

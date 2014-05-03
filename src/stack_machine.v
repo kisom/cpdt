@@ -1,4 +1,4 @@
-(** * Chapter 2: Some Quick Examples
+(** * Some Quick Examples
 
 The chapter will explore a fully-certified compiler (more than one, actually)
 to stack machines.*)
