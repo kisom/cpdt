@@ -466,4 +466,401 @@ Simple analysis shows that this would be permitted to run forever,
 which would destroy any confidence in the meaning of a proof: every
 theorem could be proven with an infinite loop.*)
 
+(** ** An Interlude on Induction Principles
+
+Coq proofs are actually programs. Let's study some induction principle
+definitions to gain additional insight:*)
+
+Print nat_ind.
+
+(**
+[[
+nat_ind = 
+fun P : nat -> Prop => nat_rect P
+     : forall P : nat -> Prop,
+       P O -> (forall n : nat, P n -> P (S n)) -> forall n : nat, P n
+]]
+*)
+
+(**
+[P] has a type of [Type] (which is another universe, like [Prop] or
+[Set]); it's actually a common supertype of both. Further exploring
+this symmetry:
+*)
+
+Print nat_rec.
+
+(**
+[[
+nat_rec = 
+fun P : nat -> Set => nat_rect P
+     : forall P : nat -> Set,
+       P O -> (forall n : nat, P n -> P (S n)) -> forall n : nat, P n
+]]
+
+It's identical to [nat_ind], except instead of [Prop], it is based on
+[Set]. We see that for most types [T], we get both the induction
+principle [T_ind] and the recursion principle [T_rec]. [T_rec] can be
+used to write recursive definitions without explicit [Fixpoint]
+recursion. This means*)
+
+Fixpoint plus_recursive (n : nat) : nat -> nat :=
+  match n with
+    | O => fun m => m
+    | S n' => fun m => S (plus_recursive n' m)
+  end.
+
+(** is identical to*)
+
+Definition plus_rec : nat -> nat -> nat :=
+  nat_rec (fun _ : nat => nat->nat) (fun m => m)
+          (fun _ r m => S (r m)).
+
+(** Proof: *)
+
+Theorem plus_equivalent: plus_recursive = plus_rec.
+Proof. reflexivity. Qed.
+
+(** This implies that [nat_rect] is not a primitive but a function
+that may be manually written:*)
+
+Print nat_rect.
+
+(**
+[[
+nat_rect = 
+fun (P : nat -> Type) (f : P O) (f0 : forall n : nat, P n -> P (S n)) =>
+fix F (n : nat) : P n :=
+  match n as n0 return (P n0) with
+  | O => f
+  | S n0 => f0 n0 (F n0)
+  end
+     : forall P : nat -> Type,
+       P O -> (forall n : nat, P n -> P (S n)) -> forall n : nat, P n
+]]
+
+[fix] is a Gallina keyword defining an anonymous recursive function,
+and match uses a dependently-typed pattern match.
+
+Type inference for dependent matching is undecideable (proven via
+reduction from higher-order unification). Programs often need
+dependence annotation to guide the type-checker. [as] binds a name for
+the discriminee, while [return] defines a means to compute the match
+result type as a function of the discriminee.
+
+The definition of [nat_ind] might be better suited for helping us to
+understand through the use of [Section].*)
+
+Section nat_ind'.
+  Variable P : nat -> Prop. (** The property we wish to prove.*)
+  Hypothesis O_case : P O. (** A proof of the O case. [Hypothesis] is a synonym of [Variable] conventionally used for variables whose type is a [Prop].*)
+  Hypothesis S_case: forall n : nat, P n -> P (S n).
+  
+  (** Tying the pieces together:*)
+
+  Fixpoint nat_ind' (n : nat) : P n :=
+    match n with
+      | O => O_case
+      | S n' => S_case (nat_ind' n')
+    end.
+End nat_ind'.
+
+(** Observing the mutuall recursive definitions of even_list_mut,
+etc... drives home the point that induction principle implementations,
+while tedious, do not require much creativity.*)
+
+(** ** Nested Inductive Types
+
+Let's extend binary trees to arbitrarily-branching trees:*)
+
+Inductive nat_tree : Set :=
+  | NNode' : nat -> list nat_tree -> nat_tree.
+
+(** This is a nested inductive type (the type being defined is used as
+the argument to a parameterised type family). In this case, Coq
+assumes [nat_tree] is being defined mutually with a specialised list
+variant. This way, strict positivity is observed. However, the default
+induction principle [nat_ind] is too weak:*)
+
+Check nat_tree_ind.
+(**
+[[
+nat_tree_ind
+     : forall P : nat_tree -> Prop,
+       (forall (n : nat) (l : list nat_tree), P (NNode' n l)) ->
+       forall n : nat_tree, P n
+]]
+
+Scheme won't help us here in improving the principle; we'll need to
+apply some creativity in implementing a suitable principle.
+
+We start with a general predicate for capturing the notion that
+property holds for all elements in a list; this is present in the
+standard library as [Forall], but for the purpose of education, an
+alternate version is implemented here as [All].*)
+
+Section All.
+  Variable T : Set.
+  Variable P : T -> Prop.
+  
+  Fixpoint All (ls : list T) : Prop :=
+    match ls with
+      | nil => True
+      | cons h t => P h /\ All t
+    end.
+End All.
+
+(** Let's review [True] and [/\]:*)
+
+Print True.
+(**
+[[
+Inductive True : Prop :=  I : True
+]]
+
+[True] is a proposition with one prof, [I].
+
+We'll have to use Locate to find [/\], which is defined as an
+arbitrary parsing rule.*)
+
+Locate "/\".
+(**
+[[
+Notation            Scope     
+"A /\ B" := and A B  : type_scope
+                      (default interpretation)
+]]
+*)
+
+Print and.
+
+(**
+[[
+Inductive and (A B : Prop) : Prop :=  conj : A -> B -> A /\ B
+
+For conj: Arguments A, B are implicit
+For and: Argument scopes are [type_scope type_scope]
+For conj: Argument scopes are [type_scope type_scope _ _]
+]]
+
+We build a proof of a conjunction by calling conj on proofs o its
+arguments (without the need to supply types explicitly.)*)
+
+Section nat_tree_ind'.
+  Variable P : nat_tree -> Prop.
+  Hypothesis NNode'_case: forall (n : nat) (ls : list nat_tree),
+                            All P ls -> P (NNode' n ls).
+
+(** A first pass at defining the recursive principle will fail:
+
+[[
+  Fixpoint nat_tree_ind' (tr : nat_tree): P tr :=
+    match tr with
+      | NNode' n ls => NNode'_case n ls (list_nat_tree_ind ls)
+    end
+    with list_nat_tree_ind (ls : list nat_tree) : All P ls :=
+           match ls with
+             | nil => I
+             | cons tr rest => conj (nat_tree_ind' tr) (list_nat_tree_ind rest)
+           end.
+]]
+
+This gives us the error
+
+[[
+Error:
+Recursive definition of list_nat_tree_ind is ill-formed.
+In environment
+P : nat_tree -> Prop
+NNode'_case : forall (n : nat) (ls : list nat_tree),
+              All P ls -> P (NNode' n ls)
+nat_tree_ind' : forall tr : nat_tree, P tr
+list_nat_tree_ind : forall ls : list nat_tree, All P ls
+ls : list nat_tree
+tr : nat_tree
+rest : list nat_tree
+Recursive call to nat_tree_ind' has principal argument equal to 
+"tr" instead of "rest".
+Recursive definition is:
+"fun ls : list nat_tree =>
+ match ls as ls0 return (All P ls0) with
+ | nil => I
+ | cons tr rest => conj (nat_tree_ind' tr) (list_nat_tree_ind rest)
+ end".
+]]
+
+It turns out that Coq applies incomplete termination checking
+heuristics. Some rules are in order: first, just as mutually inductive
+types require mutually recursive induction principles, nested types
+require nested recursion:*)
+
+  Fixpoint nat_tree_ind' (tr : nat_tree) : P tr :=
+    match tr with
+      | NNode' n ls => NNode'_case n ls
+        ((fix list_nat_tree_ind (ls : list nat_tree) : All P ls :=
+           match ls with
+             | nil => I
+             | cons tr' rest =>
+               conj (nat_tree_ind' tr') (list_nat_tree_ind rest)
+           end) ls)
+    end.
+
+(** The anonymous recursion provided by [fix] is nested in the definition.*)
+
+End nat_tree_ind'.
+
+(** Before testing the induction principle, we'll define some list
+helpers:*)
+
+Section map.
+  Variable T T' : Set.
+  Variable F : T -> T'.
+
+  Fixpoint map (ls : list T) : list T' :=
+    match ls with
+      | nil => nil
+      | cons h t => cons (F h) (map t)
+    end.
+End map.
+
+Fixpoint sum (ls : list nat) : nat :=
+  match ls with
+    | nil => O
+    | cons h t => plus h (sum t)
+  end.
+
+Fixpoint ntsize (tr : nat_tree) : nat :=
+  match tr with
+    | NNode' _ trs => S (sum (map ntsize trs))
+  end.
+
+Fixpoint ntsplice (tr1 tr2 : nat_tree) : nat_tree :=
+  match tr1 with
+    | NNode' n nil => NNode' n (cons tr2 nil)
+    | NNode' n (cons tr trs)=> NNode' n (cons (ntsplice tr tr2) trs)
+  end.
+
+(** We can now prove an arbitrary theorem about tree size:*)
+
+Lemma plus_S: forall n1 n2 : nat,
+      plus n1 (S n2) = S (plus n1 n2).
+Proof. induction n1; crush. Qed.
+
+Theorem ntsize_ntsplice: forall tr1 tr2 : nat_tree,
+        ntsize (ntsplice tr1 tr2) = plus (ntsize tr2) (ntsize tr1).
+Proof.
+  Hint Rewrite plus_S.
+  induction tr1 using nat_tree_ind'; crush.
+
+(** This results in one remaining subgoal: a case analysis will see us
+through:*)
+
+  destruct ls; crush.
+
+(** However, there is a more effective means of automating the proof:*)
+  Restart.
+  Hint Extern 1 (ntsize (match ?LS with nil => _
+                            | cons _ _ => _ end) = _) =>
+                destruct LS; crush.
+  induction tr1 using nat_tree_ind'; crush.
+Qed.
+
+(** The hint registers a conclusion expected in the proof. Unification
+variables (prefixed with ?) refer to bound variables in a tactic. The
+hint makes the proof more readable by explaining the process by which
+variables are selected for case analysis.*)
+
+(** ** Manual Proofs about Constructors
+
+Stepping through some manual proofs will help understand how tactics
+like discriminate and injection operate. Here is a proof that would be
+suitable for discriminate:*)
+
+Theorem true_neq_false: true <> false.
+Proof.
+
+(** First, one step of reduction:*)
+
+  red.
+
+(** This gives us
+[[
+1 subgoals, subgoal 1 (ID 1880)
+  
+  ============================
+   true = false -> False
+]]*)
+
+  intro H.
+
+(**
+[[
+1 subgoals, subgoal 1 (ID 1881)
+  
+  H : true = false
+  ============================
+   False
+]]*)
+
+  Definition toProp (b : bool) := if b then True else False.
+  change (toProp false).
+
+(**
+[[
+1 subgoals, subgoal 1 (ID 1885)
+  
+  H : true = false
+  ============================
+   toProp false
+]]*)
+
+  rewrite <- H.
+(**
+[[
+1 subgoals, subgoal 1 (ID 1886)
+  
+  H : true = false
+  ============================
+   toProp true
+]]
+*)
+
+  simpl.
+
+(**
+[[
+1 subgoals, subgoal 1 (ID 1887)
+  
+  H : true = false
+  ============================
+   True
+]]*)
+
+  trivial.
+Qed.
+
+(** It is also worthwhile to step through the following (but that
+won't be done here):*)
+
+Theorem S_inj': forall n m : nat,
+        S n = S m -> n = m.
+Proof.
+  intros n m H.
+  change (pred (S n) = pred (S m)).
+  rewrite H.
+  reflexivity.
+Qed.
+
+(** [injection] can do this style of using type-specific functions.*)
+
+Theorem S_inj'': forall n m : nat,
+        S n = S m -> n = m.
+Proof.
+  intros n m H.
+  injection H.
+  crush.
+Qed.
+
+(** A few carefully chosen rules enable desired reasoning patterns,
+minimising the complexity of proof checking.*)
 
