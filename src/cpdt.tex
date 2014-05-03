@@ -1,4 +1,4 @@
-\documentclass[10pt]{article}
+\documentclass[10pt,twoside,titlepage]{article}
 \usepackage{coqdoc}
 \usepackage[margin=0.75in]{geometry}
 \usepackage{fancyvrb}
@@ -25,9 +25,12 @@
 \begin{document}
 \maketitle
 \setcounter{tocdepth}{2}
+\cleardoublepage
 \tableofcontents
+\cleardoublepage
 
 \input{stack_machine}
+\cleardoublepage
 \input{induction}
 
 \end{document}
