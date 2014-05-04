@@ -1,6 +1,6 @@
-HTML_FILES = stack_machine.html induction.html
+HTML_FILES = stack_machine.html induction.html predicates.html
 PDF_FILES = cpdt.pdf
-TEX_CHAPTERS = stack_machine.tex induction.tex
+TEX_CHAPTERS = stack_machine.tex induction.tex predicates.tex
 
 %.html: %.glob
 	coqdoc $*.v
